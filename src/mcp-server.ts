@@ -23,9 +23,10 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages.",
+  'Send a message to the user or group immediately.',
   {
     text: z.string().describe('The message text to send'),
+    jid: z.string().describe('The recipient JID (optional)').optional(),
   },
   async (args) => {
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };

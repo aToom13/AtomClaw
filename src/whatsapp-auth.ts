@@ -25,7 +25,7 @@ async function connectToWhatsApp() {
 
   const sock = makeWASocket({
     auth: state,
-    browser: Browsers.macOS('AtomClaw'),
+    browser: ['Ubuntu', 'AtomClaw', '22.04.4'],
     version,
   });
 
