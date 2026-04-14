@@ -1,6 +1,7 @@
 import makeWASocket, {
   useMultiFileAuthState,
   Browsers,
+  fetchLatestBaileysVersion,
 } from '@whiskeysockets/baileys';
 import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
@@ -12,9 +13,12 @@ async function main() {
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
+  const { version } = await fetchLatestBaileysVersion();
+
   const sock = makeWASocket({
     auth: state,
     browser: Browsers.macOS('AtomClaw'),
+    version,
   });
 
   sock.ev.on('creds.update', saveCreds);
