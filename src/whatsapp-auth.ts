@@ -14,7 +14,7 @@ async function main() {
 
   const sock = makeWASocket({
     auth: state,
-    browser: Browsers.ubuntu('AtomClaw'),
+    browser: Browsers.macOS('AtomClaw'),
   });
 
   sock.ev.on('creds.update', saveCreds);
