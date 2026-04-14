@@ -6,6 +6,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import QRCode from 'qrcode';
+import fs from 'fs';
 import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
 import path from 'path';
@@ -13,6 +14,13 @@ import path from 'path';
 async function connectToWhatsApp() {
   const sessionPath = path.join(DATA_DIR, 'baileys-auth');
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+
+  if (!state.creds.registered) {
+    console.log('Yeni oturum başlatılıyor...');
+  } else {
+    console.log('Mevcut oturum ile bağlanıyor...');
+  }
+
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -41,7 +49,18 @@ async function connectToWhatsApp() {
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+      // 401 = unauthorized, session silinmeli
+      if (statusCode === 401) {
+        console.log('Session geçersiz, temizleniyor...');
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log('Session temizlendi. Tekrar bağlanılıyor...');
+        setTimeout(connectToWhatsApp, 3000);
+        return;
+      }
+
+      const shouldReconnect = !isLoggedOut;
       console.log(
         `Bağlantı kapandı (code: ${statusCode}). Tekrar bağlanılıyor: ${shouldReconnect}`,
       );
