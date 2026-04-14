@@ -5,6 +5,7 @@ import makeWASocket, {
 import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
 import path from 'path';
+import QRCode from 'qrcode';
 
 async function main() {
   const sessionPath = path.join(DATA_DIR, 'baileys-auth');
@@ -14,20 +15,23 @@ async function main() {
   const sock = makeWASocket({
     auth: state,
     browser: Browsers.ubuntu('AtomClaw'),
-    printQRInTerminal: true,
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('\n📱 QR Kodu - WhatsApp ile Tara\n');
+      console.log('\n📱 WhatsApp QR Kodu - Telefondan Tara:\n');
+      console.log('WhatsApp > Ayarlar > Bağlı Cihazlar > Cihaz Ekle\n');
+      const qrString = await QRCode.toString(qr, { type: 'terminal' });
+      console.log(qrString);
+      console.log('\n');
     }
 
     if (connection === 'open') {
-      console.log('\n✅ WhatsApp bağlandı!\n');
+      console.log('✅ WhatsApp bağlandı!\n');
     }
 
     if (connection === 'close') {

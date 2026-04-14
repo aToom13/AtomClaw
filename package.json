@@ -26,6 +26,7 @@
     "cron-parser": "5.5.0",
     "libphonenumber-js": "^1.11.17",
     "open": "^10.1.0",
+    "qrcode": "^1.5.4",
     "zod": "^3.24.2"
   },
   "devDependencies": {
