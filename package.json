@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",
-    "@whiskey/bailey": "^1.2.0",
+    "@whiskey/baileys": "^6.8.5",
     "better-sqlite3": "11.10.0",
     "cron-parser": "5.5.0",
     "libphonenumber-js": "^1.11.17",
