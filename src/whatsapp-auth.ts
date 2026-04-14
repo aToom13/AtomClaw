@@ -2,17 +2,17 @@ import makeWASocket, {
   useMultiFileAuthState,
   Browsers,
   fetchLatestBaileysVersion,
+  DisconnectReason,
 } from '@whiskeysockets/baileys';
+import { Boom } from '@hapi/boom';
+import QRCode from 'qrcode';
 import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
 import path from 'path';
-import QRCode from 'qrcode';
 
-async function main() {
+async function connectToWhatsApp() {
   const sessionPath = path.join(DATA_DIR, 'baileys-auth');
-
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -35,11 +35,23 @@ async function main() {
     }
 
     if (connection === 'open') {
-      console.log('✅ WhatsApp bağlandı!\n');
+      console.log('✅ WhatsApp bağlandı!');
+      console.log('Bot hazır. Çıkmak için Ctrl+C\n');
     }
 
     if (connection === 'close') {
-      console.log('\n❌ Bağlantı kapandı\n');
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log(
+        `Bağlantı kapandı (code: ${statusCode}). Tekrar bağlanılıyor: ${shouldReconnect}`,
+      );
+
+      if (shouldReconnect) {
+        setTimeout(connectToWhatsApp, 3000);
+      } else {
+        console.log('Çıkış yapıldı. Tekrar QR taramanız gerekiyor.');
+        process.exit(0);
+      }
     }
   });
 
@@ -52,7 +64,7 @@ const isDirectRun =
     new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
-  main().catch((err) => {
+  connectToWhatsApp().catch((err) => {
     logger.error({ err }, 'Auth error');
     process.exit(1);
   });
