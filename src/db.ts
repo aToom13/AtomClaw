@@ -157,6 +157,24 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Add plans table (migration for existing DBs)
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS plans (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        day_of_week INTEGER,
+        start_time TEXT,
+        end_time TEXT,
+        recurrence TEXT DEFAULT 'weekly',
+        created_at TEXT NOT NULL
+      )
+    `);
+  } catch {
+    /* table already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -547,6 +565,32 @@ export function logTaskRun(log: TaskRunLog): void {
   );
 }
 
+// --- Config accessors (stored with 'config:' prefix) ---
+
+export function getConfig(key: string): string | undefined {
+  const row = db
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(`config:${key}`) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setConfig(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run(`config:${key}`, value);
+}
+
+export function getAllConfig(): Record<string, string> {
+  const rows = db
+    .prepare('SELECT key, value FROM router_state WHERE key LIKE ?')
+    .all('config:%') as Array<{ key: string; value: string }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    result[row.key.replace('config:', '')] = row.value;
+  }
+  return result;
+}
+
 // --- Router state accessors ---
 
 export function getRouterState(key: string): string | undefined {
@@ -590,6 +634,50 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+// --- Plan accessors ---
+
+export interface Plan {
+  id: string;
+  title: string;
+  description?: string;
+  day_of_week?: number;
+  start_time?: string;
+  end_time?: string;
+  recurrence: string;
+  created_at: string;
+}
+
+export function getPlans(dayOfWeek?: number): Plan[] {
+  if (dayOfWeek !== undefined) {
+    return db
+      .prepare('SELECT * FROM plans WHERE day_of_week = ? ORDER BY start_time')
+      .all(dayOfWeek) as Plan[];
+  }
+  return db
+    .prepare('SELECT * FROM plans ORDER BY day_of_week, start_time')
+    .all() as Plan[];
+}
+
+export function addPlan(plan: Plan): void {
+  db.prepare(
+    `INSERT INTO plans (id, title, description, day_of_week, start_time, end_time, recurrence, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    plan.id,
+    plan.title,
+    plan.description ?? null,
+    plan.day_of_week ?? null,
+    plan.start_time ?? null,
+    plan.end_time ?? null,
+    plan.recurrence,
+    plan.created_at,
+  );
+}
+
+export function deletePlan(id: string): void {
+  db.prepare('DELETE FROM plans WHERE id = ?').run(id);
 }
 
 // --- Registered group accessors ---

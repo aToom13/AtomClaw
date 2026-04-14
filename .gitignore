@@ -9,14 +9,29 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - only track base structure and AGENT.md files
 groups/*
 !groups/main/
 !groups/global/
+!groups/memory/
 groups/main/*
 groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+groups/memory/archive/
+groups/memory/custom/
+groups/memory/tmp/
+!groups/main/AGENT.md
+!groups/global/AGENT.md
+!groups/memory/MEMORY.md
+!groups/memory/DAILY.md
+
+# Skills
+skills/agent/*
+!skills/agent/AGENT.md
+cli-skills/*
+!cli-skills/add-whatsapp/
+!cli-skills/add-telegram/
+!cli-skills/setup/
+!cli-skills/customize/
 
 # Secrets
 *.keys.json
@@ -32,7 +47,6 @@ groups/global/*
 .idea/
 .vscode/
 
-# Skills system (local per-installation state)
-.nanoclaw/
-
-agents-sdk-docs
+# Kilo
+.kilo/
+.claude/
