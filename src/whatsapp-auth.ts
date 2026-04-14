@@ -1,4 +1,4 @@
-import WhatsApp from '@whiskey/baileys';
+import WhatsApp from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
 import { parsePhoneNumber } from 'libphonenumber-js';
@@ -6,7 +6,7 @@ import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
 
 async function main() {
-  const { default: makeWASocket } = await import('@whiskey/baileys');
+  const { default: makeWASocket } = await import('@whiskeysockets/baileys');
 
   const sessionPath = path.join(DATA_DIR, 'whatsapp-session');
 
