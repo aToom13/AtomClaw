@@ -1,42 +1,41 @@
-import WhatsApp from '@whiskeysockets/baileys';
-import fs from 'fs';
-import path from 'path';
-import { parsePhoneNumber } from 'libphonenumber-js';
+import makeWASocket, {
+  useMultiFileAuthState,
+  Browsers,
+} from '@whiskeysockets/baileys';
 import { logger } from './logger.js';
 import { DATA_DIR } from './config.js';
+import path from 'path';
 
 async function main() {
-  const { default: makeWASocket } = await import('@whiskeysockets/baileys');
+  const sessionPath = path.join(DATA_DIR, 'baileys-auth');
 
-  const sessionPath = path.join(DATA_DIR, 'whatsapp-session');
+  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
   const sock = makeWASocket({
+    auth: state,
+    browser: Browsers.ubuntu('AtomClaw'),
     printQRInTerminal: true,
-    auth: {
-      session: sessionPath,
-    },
   });
 
-  sock.ev.on('creds.update', () => {
-    logger.info('Credentials updated, session saved');
-  });
+  sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
-    if (update.qr) {
-      console.log('\n=== QR KODU TARA ===');
-      console.log('WhatsApp > Ayarlar > Bağlı Cihazlar > Cihaz Ekle');
-      console.log('====================\n');
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log('\n📱 QR Kodu - WhatsApp ile Tara\n');
     }
 
-    if (update.connection === 'open') {
-      console.log('✅ WhatsApp bağlandı!');
-      console.log('Bot hazır. Çıkmak için Ctrl+C');
+    if (connection === 'open') {
+      console.log('\n✅ WhatsApp bağlandı!\n');
     }
 
-    if (update.connection === 'close') {
-      console.log('❌ Bağlantı kapandı');
+    if (connection === 'close') {
+      console.log('\n❌ Bağlantı kapandı\n');
     }
   });
+
+  console.log('WhatsApp bağlanıyor...');
 }
 
 const isDirectRun =
