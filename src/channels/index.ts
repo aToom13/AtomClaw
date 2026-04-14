@@ -3,17 +3,9 @@
 
 import { registerChannel } from './registry.js';
 import { WhatsAppChannel } from './whatsapp.js';
+import { WHATSAPP_ENABLED } from '../config.js';
 
-// discord
-
-// gmail
-
-// slack
-
-// telegram
-
-// whatsapp
 registerChannel('whatsapp', (opts) => {
-  if (process.env.WHATSAPP_ENABLED !== 'true') return null;
+  if (!WHATSAPP_ENABLED) return null;
   return new WhatsAppChannel(opts);
 });
