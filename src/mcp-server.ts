@@ -14,7 +14,12 @@ import {
   Plan,
   setConfig,
   getAllConfig,
+  setRegisteredGroup,
+  initDatabase,
+  enqueuePendingMessage,
 } from './db.js';
+import { isValidGroupFolder } from './group-folder.js';
+import type { RegisteredGroup } from './types.js';
 
 const server = new McpServer({
   name: 'atomclaw',
@@ -23,13 +28,33 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  'Send a message to the user or group immediately.',
+  'Send a message to the user or group immediately. NOTE: Requires the main bot process to be running; messages are queued via the shared database.',
   {
     text: z.string().describe('The message text to send'),
     jid: z.string().describe('The recipient JID (optional)').optional(),
   },
   async (args) => {
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const targetJid = args.jid || '';
+    if (!targetJid) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Error: jid is required to send a message.',
+          },
+        ],
+        isError: true,
+      };
+    }
+    enqueuePendingMessage(targetJid, args.text);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Message queued for ${targetJid}. The main bot process will send it within a few seconds.`,
+        },
+      ],
+    };
   },
 );
 
@@ -147,19 +172,49 @@ server.tool(
 
 server.tool(
   'register_group',
-  'Register a new group (main only).',
+  'Register a new group so the bot processes its messages.',
   {
-    jid: z.string(),
-    name: z.string(),
-    folder: z.string(),
-    trigger: z.string(),
+    jid: z.string().describe('WhatsApp JID, e.g. 1234@s.whatsapp.net or 1234@g.us'),
+    name: z.string().describe('Display name for the group'),
+    folder: z.string().describe('Folder name for group files (alphanumeric, no spaces)'),
+    trigger: z.string().describe('Trigger word/phrase, e.g. @Atom'),
+    requires_trigger: z.boolean().default(true).describe('Require trigger word before responding'),
   },
-  async () => {
-    return {
-      content: [
-        { type: 'text', text: 'Use channel commands to register groups' },
-      ],
+  async (args) => {
+    if (!isValidGroupFolder(args.folder)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Invalid folder name "${args.folder}". Use alphanumeric characters only (max 64 chars).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const group: RegisteredGroup = {
+      name: args.name,
+      folder: args.folder,
+      trigger: args.trigger,
+      added_at: new Date().toISOString(),
+      requiresTrigger: args.requires_trigger,
     };
+    try {
+      setRegisteredGroup(args.jid, group);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Group "${args.name}" (${args.jid}) registered with folder "${args.folder}". The bot will detect it within 60 seconds.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error: ${err}` }],
+        isError: true,
+      };
+    }
   },
 );
 
@@ -356,6 +411,21 @@ server.tool(
 );
 
 export async function startMcpServer(): Promise<void> {
+  // Initialize DB so all tool handlers that access the database work correctly
+  initDatabase();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+}
+
+// Allow running as standalone stdio MCP server: `npm run mcp`
+const isDirectRun =
+  process.argv[1] &&
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
+
+if (isDirectRun) {
+  startMcpServer().catch((err) => {
+    process.stderr.write(`MCP server failed to start: ${err}\n`);
+    process.exit(1);
+  });
 }

@@ -1,9 +1,12 @@
+import fs from 'fs';
+import path from 'path';
+
 import {
   ASSISTANT_NAME,
+  AUTO_REGISTER_MAIN_JID,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
-  MAX_CONCURRENT_AGENTS,
   MAX_MESSAGES_PER_PROMPT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -17,8 +20,6 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
-  deleteSession,
-  getAllTasks,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
@@ -26,9 +27,10 @@ import {
   initDatabase,
   setRegisteredGroup,
   setRouterState,
-  setSession,
   storeChatMetadata,
   storeMessage,
+  dequeuePendingMessages,
+  deletePendingMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -52,7 +54,20 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
-let providerInitialized = false;
+
+// Allowlist cache — avoid reading from disk on every message
+let _allowlistCache: ReturnType<typeof loadSenderAllowlist> | null = null;
+let _allowlistCacheTs = 0;
+const ALLOWLIST_CACHE_TTL = 30_000;
+
+function getCachedAllowlist(): ReturnType<typeof loadSenderAllowlist> {
+  const now = Date.now();
+  if (!_allowlistCache || now - _allowlistCacheTs > ALLOWLIST_CACHE_TTL) {
+    _allowlistCache = loadSenderAllowlist();
+    _allowlistCacheTs = now;
+  }
+  return _allowlistCache;
+}
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -185,7 +200,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
-    const allowlistCfg = loadSenderAllowlist();
+    const allowlistCfg = getCachedAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
         triggerPattern.test(m.content.trim()) &&
@@ -272,8 +287,27 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`AtomClaw running (default trigger: ${DEFAULT_TRIGGER})`);
 
+  let lastGroupSyncTime = 0;
+  const GROUP_SYNC_MS = 60_000; // re-read registered groups from DB every 60s
+
   while (true) {
     try {
+      // Periodically sync registered groups from DB so that groups registered
+      // via MCP or other external tools are picked up without a restart.
+      const now = Date.now();
+      if (now - lastGroupSyncTime > GROUP_SYNC_MS) {
+        lastGroupSyncTime = now;
+        const freshGroups = getAllRegisteredGroups();
+        for (const [jid, group] of Object.entries(freshGroups)) {
+          if (!registeredGroups[jid]) {
+            logger.info(
+              { jid, name: group.name },
+              'DB sync: discovered new registered group',
+            );
+            registerGroup(jid, group);
+          }
+        }
+      }
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -312,7 +346,7 @@ async function startMessageLoop(): Promise<void> {
 
           if (needsTrigger) {
             const triggerPattern = getTriggerPattern(group.trigger);
-            const allowlistCfg = loadSenderAllowlist();
+            const allowlistCfg = getCachedAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
                 triggerPattern.test(m.content.trim()) &&
@@ -322,37 +356,32 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          const allPending = getMessagesSince(
-            chatJid,
-            getOrRecoverCursor(chatJid),
-            ASSISTANT_NAME,
-            MAX_MESSAGES_PER_PROMPT,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
-
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Queued messages for processing',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
-          } else {
-            queue.enqueueMessageCheck(chatJid);
-          }
+          queue.enqueueMessageCheck(chatJid);
         }
       }
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }
+    // Drain MCP-queued outbound messages
+    try {
+      const pending = dequeuePendingMessages();
+      for (const pm of pending) {
+        const ch = findChannel(channels, pm.jid);
+        if (ch) {
+          const text = formatOutbound(pm.text);
+          if (text) {
+            await ch.sendMessage(pm.jid, text);
+            logger.info({ jid: pm.jid }, 'Sent MCP-queued message');
+          }
+        } else {
+          logger.warn({ jid: pm.jid }, 'No channel for pending message, dropping');
+        }
+        deletePendingMessage(pm.id);
+      }
+    } catch (err) {
+      logger.error({ err }, 'Error draining pending messages');
+    }
+
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
 }
@@ -375,15 +404,11 @@ function recoverPendingMessages(): void {
   }
 }
 
-import fs from 'fs';
-import path from 'path';
-
 async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
 
   await initProvider();
-  providerInitialized = true;
   logger.info('Provider initialized');
 
   loadState();
@@ -400,7 +425,7 @@ async function main(): Promise<void> {
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
-        const cfg = loadSenderAllowlist();
+        const cfg = getCachedAllowlist();
         if (
           shouldDropMessage(chatJid, cfg) &&
           !isSenderAllowed(chatJid, msg.sender, cfg)
@@ -448,8 +473,6 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, groupFolder) =>
-      queue.registerProcess(groupJid, null as never, '', groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
@@ -460,6 +483,22 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+
+  // Auto-register main JID if configured and not yet registered
+  if (AUTO_REGISTER_MAIN_JID && !registeredGroups[AUTO_REGISTER_MAIN_JID]) {
+    logger.info(
+      { jid: AUTO_REGISTER_MAIN_JID },
+      'Auto-registering main JID from AUTO_REGISTER_MAIN_JID config',
+    );
+    registerGroup(AUTO_REGISTER_MAIN_JID, {
+      name: 'Main',
+      folder: 'main',
+      trigger: DEFAULT_TRIGGER,
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+      isMain: true,
+    });
+  }
 
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

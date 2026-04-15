@@ -16,7 +16,7 @@ import {
   RegisteredGroup,
 } from '../types.js';
 import { logger } from '../logger.js';
-import { DATA_DIR } from '../config.js';
+import { ASSISTANT_NAME, DATA_DIR } from '../config.js';
 
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
@@ -118,31 +118,55 @@ export class WhatsAppChannel implements Channel {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        if (!msg.key.remoteJid || msg.key.fromMe) continue;
+        if (!msg.key.remoteJid) continue;
 
         const chatJid = msg.key.remoteJid;
+        const isFromMe = !!msg.key.fromMe;
         const sender = msg.key.participant || msg.key.remoteJid;
-        const senderName = msg.pushName || sender.split('@')[0];
-        const content =
-          msg.message?.conversation ||
-          msg.message?.extendedTextMessage?.text ||
+        const senderName = isFromMe
+          ? ASSISTANT_NAME
+          : msg.pushName || sender.split('@')[0];
+        // Extract text content from any message type
+        const msgContent = msg.message;
+        let content =
+          msgContent?.conversation ||
+          msgContent?.extendedTextMessage?.text ||
           '';
+
+        // Media messages: extract caption or generate a placeholder
+        if (!content) {
+          if (msgContent?.imageMessage) {
+            content = msgContent.imageMessage.caption
+              ? `[Image: ${msgContent.imageMessage.caption}]`
+              : '[Image]';
+          } else if (msgContent?.videoMessage) {
+            content = msgContent.videoMessage.caption
+              ? `[Video: ${msgContent.videoMessage.caption}]`
+              : '[Video]';
+          } else if (msgContent?.audioMessage) {
+            content = '[Voice message]';
+          } else if (msgContent?.documentMessage) {
+            content = msgContent.documentMessage.fileName
+              ? `[Document: ${msgContent.documentMessage.fileName}]`
+              : '[Document]';
+          } else if (msgContent?.stickerMessage) {
+            content = '[Sticker]';
+          } else if (msgContent?.locationMessage) {
+            const lat = msgContent.locationMessage.degreesLatitude?.toFixed(6);
+            const lng = msgContent.locationMessage.degreesLongitude?.toFixed(6);
+            content = `[Location: ${lat}, ${lng}]`;
+          } else if (msgContent?.contactMessage) {
+            content = `[Contact: ${msgContent.contactMessage.displayName || 'unknown'}]`;
+          } else if (msgContent?.reactionMessage) {
+            content = `[Reaction: ${msgContent.reactionMessage.text || ''}]`;
+          }
+        }
 
         if (!content) continue;
 
         const timestamp = new Date(
           (msg.messageTimestamp as number) * 1000,
         ).toISOString();
-
-        this.onMessage(chatJid, {
-          id: msg.key.id || '',
-          chat_jid: chatJid,
-          sender,
-          sender_name: senderName,
-          content,
-          timestamp,
-          is_from_me: false,
-        });
 
         this.onChatMetadata(
           chatJid,
@@ -151,6 +175,17 @@ export class WhatsAppChannel implements Channel {
           'whatsapp',
           chatJid.endsWith('@g.us'),
         );
+
+        this.onMessage(chatJid, {
+          id: msg.key.id || '',
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content,
+          timestamp,
+          is_from_me: isFromMe,
+          is_bot_message: isFromMe,
+        });
       }
     });
   }

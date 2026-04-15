@@ -1,8 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
-  getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
@@ -50,7 +49,6 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
@@ -59,9 +57,8 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
-  let groupDir: string;
   try {
-    groupDir = resolveGroupFolderPath(task.group_folder);
+    resolveGroupFolderPath(task.group_folder); // validate path only
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     updateTask(task.id, { status: 'paused' });
@@ -112,7 +109,7 @@ async function runTask(
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
   try {
-    const output = await runAgent(
+    await runAgent(
       {
         prompt: task.prompt,
         sessionId,

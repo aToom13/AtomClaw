@@ -10,15 +10,18 @@ import {
 
 describe('group folder validation', () => {
   it('accepts normal group folder names', () => {
-    expect(isValidGroupFolder('main')).toBe(true);
     expect(isValidGroupFolder('family-chat')).toBe(true);
     expect(isValidGroupFolder('Team_42')).toBe(true);
+    expect(isValidGroupFolder('mygroup')).toBe(true);
   });
 
   it('rejects traversal and reserved names', () => {
     expect(isValidGroupFolder('../../etc')).toBe(false);
     expect(isValidGroupFolder('/tmp')).toBe(false);
     expect(isValidGroupFolder('global')).toBe(false);
+    expect(isValidGroupFolder('main')).toBe(false);
+    expect(isValidGroupFolder('memory')).toBe(false);
+    expect(isValidGroupFolder('archive')).toBe(false);
     expect(isValidGroupFolder('')).toBe(false);
   });
 

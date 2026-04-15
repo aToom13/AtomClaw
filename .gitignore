@@ -50,3 +50,8 @@ cli-skills/*
 # Kilo
 .kilo/
 .claude/
+
+# Local reports & reference
+Rapor.md
+atomclaw_analysis_report.md
+openclaw/

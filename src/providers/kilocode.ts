@@ -1,6 +1,6 @@
 import open from 'open';
 
-import { KILOCODE_TOKEN } from '../config.js';
+import { KILOCODE_TOKEN, KILOCODE_MODEL } from '../config.js';
 import { logger } from '../logger.js';
 
 const KILOCODE_API_BASE_URL = 'https://api.kilo.ai';
@@ -12,8 +12,49 @@ export interface Message {
   content: string;
 }
 
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolResultMessage {
+  role: 'tool';
+  tool_call_id: string;
+  name: string;
+  content: string;
+}
+
+export interface AssistantToolCallMessage {
+  role: 'assistant';
+  content: string | null;
+  tool_calls: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
+}
+
+export type AnyMessage = Message | ToolResultMessage | AssistantToolCallMessage;
+
+export interface ChatResponse {
+  content: string;
+  toolCalls?: ToolCall[];
+}
+
 export interface Provider {
   chat(messages: Message[], systemPrompt: string): Promise<string>;
+  chatWithTools?(
+    messages: AnyMessage[],
+    systemPrompt: string,
+    tools: ToolDefinition[],
+  ): Promise<ChatResponse>;
   isAvailable(): Promise<boolean>;
 }
 
@@ -164,18 +205,9 @@ export class KilocodeProvider implements Provider {
     }
   }
 
-  async chat(messages: Message[], systemPrompt: string): Promise<string> {
-    const body = {
-      model: 'openai/gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-      ],
-    };
-
+  private async callApi(
+    body: Record<string, unknown>,
+  ): Promise<{ choices: Array<{ message: { content: string | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } }> }> {
     const response = await fetch(
       KILOCODE_OPENROUTER_PROXY_URL + 'chat/completions',
       {
@@ -195,11 +227,85 @@ export class KilocodeProvider implements Provider {
       throw new Error(`Kilocode API error: ${response.status} - ${error}`);
     }
 
-    const data = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
+    return (await response.json()) as {
+      choices: Array<{ message: { content: string | null; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> } }>;
+    };
+  }
+
+  async chat(messages: Message[], systemPrompt: string): Promise<string> {
+    const body = {
+      model: KILOCODE_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ],
     };
 
+    const data = await this.callApi(body);
     return data.choices[0]?.message?.content ?? '';
+  }
+
+  async chatWithTools(
+    messages: AnyMessage[],
+    systemPrompt: string,
+    tools: ToolDefinition[],
+  ): Promise<ChatResponse> {
+    const apiTools = tools.map((t) => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    }));
+
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.map((m) => {
+        if (m.role === 'tool') {
+          return {
+            role: 'tool' as const,
+            tool_call_id: m.tool_call_id,
+            name: m.name,
+            content: m.content,
+          };
+        }
+        if (m.role === 'assistant' && 'tool_calls' in m) {
+          return {
+            role: 'assistant' as const,
+            content: m.content,
+            tool_calls: m.tool_calls,
+          };
+        }
+        return { role: m.role, content: (m as Message).content };
+      }),
+    ];
+
+    const body: Record<string, unknown> = {
+      model: KILOCODE_MODEL,
+      messages: apiMessages,
+      tools: apiTools,
+      tool_choice: 'auto',
+    };
+
+    const data = await this.callApi(body);
+    const msg = data.choices[0]?.message;
+    if (!msg) return { content: '' };
+
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      const toolCalls: ToolCall[] = msg.tool_calls.map((tc) => {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+        } catch {
+          args = {};
+        }
+        return { id: tc.id, name: tc.function.name, arguments: args };
+      });
+      return { content: msg.content ?? '', toolCalls };
+    }
+
+    return { content: msg.content ?? '' };
   }
 }
 

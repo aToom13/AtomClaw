@@ -13,6 +13,8 @@ const envConfig = readEnvFile([
   'OLLAMA_MODEL',
   'TZ',
   'WHATSAPP_ENABLED',
+  'KILOCODE_MODEL',
+  'AUTO_REGISTER_MAIN_JID',
 ]);
 
 export const PROVIDER =
@@ -31,9 +33,15 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const KILOCODE_MODEL =
+  process.env.KILOCODE_MODEL || envConfig.KILOCODE_MODEL || 'kilo-auto-free';
 export const WHATSAPP_ENABLED =
   process.env.WHATSAPP_ENABLED === 'true' ||
   envConfig.WHATSAPP_ENABLED === 'true';
+// If set, the bot auto-registers this JID as the main group on startup.
+// Useful for first-time setup. Example: 123456789@s.whatsapp.net (DM) or 123@g.us (group)
+export const AUTO_REGISTER_MAIN_JID =
+  process.env.AUTO_REGISTER_MAIN_JID || envConfig.AUTO_REGISTER_MAIN_JID || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

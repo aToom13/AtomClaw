@@ -16,6 +16,7 @@
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "mcp": "tsx src/mcp-server.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

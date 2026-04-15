@@ -140,8 +140,12 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
     );
+    // NOTE: Telegram groups and DMs both use 'tg:' prefix. Without knowing the
+    // exact JID format used by a future Telegram channel implementation, we cannot
+    // reliably distinguish groups from DMs here. Setting is_group = 0 as default;
+    // the Telegram channel implementation must set is_group correctly on insert.
     database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`,
+      `UPDATE chats SET channel = 'telegram' WHERE jid LIKE 'tg:%'`,
     );
   } catch {
     /* columns already exist */
@@ -169,6 +173,20 @@ function createSchema(database: Database.Database): void {
         start_time TEXT,
         end_time TEXT,
         recurrence TEXT DEFAULT 'weekly',
+        created_at TEXT NOT NULL
+      )
+    `);
+  } catch {
+    /* table already exists */
+  }
+
+  // Outbound message queue: MCP send_message writes here, main process drains it
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS pending_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        text TEXT NOT NULL,
         created_at TEXT NOT NULL
       )
     `);
@@ -775,6 +793,33 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Pending outbound messages (MCP send_message queue) ---
+
+export interface PendingMessage {
+  id: number;
+  jid: string;
+  text: string;
+  created_at: string;
+}
+
+export function enqueuePendingMessage(jid: string, text: string): void {
+  db.prepare(
+    'INSERT INTO pending_messages (jid, text, created_at) VALUES (?, ?, ?)',
+  ).run(jid, text, new Date().toISOString());
+}
+
+export function dequeuePendingMessages(): PendingMessage[] {
+  return db
+    .prepare(
+      'SELECT id, jid, text, created_at FROM pending_messages ORDER BY id LIMIT 50',
+    )
+    .all() as PendingMessage[];
+}
+
+export function deletePendingMessage(id: number): void {
+  db.prepare('DELETE FROM pending_messages WHERE id = ?').run(id);
 }
 
 // --- JSON migration ---
